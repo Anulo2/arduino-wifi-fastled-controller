@@ -6,21 +6,22 @@
  */
 
 // Define the board to regulate which libraries are loaded.
-#define ESP32 1
-//#define ESP8266 1
+// #define ESP32 1
+#define ESP8266 1
 
 // Define to use WIFI or a button or both to change animations on the strip.
-#define WIFI 0
-#define BUTTON 1
+#define WIFI 1
+#define BUTTON 0
 
+#include <ArduinoJson.h>
 
 #ifdef WIFI
   // this name is shown in the browser 'app'
-  #define STRIP_NAME          "Mittel-Gang"
+  #define STRIP_NAME          "Zai's Leds"
   // Configure your WiFi settings for the webserver
   // -> replace the SSID and password with the credentials of your WiFi
-  const char* ssid = "<wifi-ssid>";
-  const char* password = "<wifi-pass>";
+  const char* ssid = "Zai's Leds";
+  const char* password = "YourSuperDifficultPasswordHere";
 
   #ifdef ESP32
     #include <WiFi.h>
@@ -40,21 +41,23 @@
   unsigned long buttonLast;
 #endif
 
+#define FASTLED_ESP8266_RAW_PIN_ORDER
+
 //#define FASTLED_ALLOW_INTERRUPTS 0
 #include <FastLED.h>
 FASTLED_USING_NAMESPACE
 
-
 // FastLED
 #define DATA_PIN            16
-#define LED_TYPE            WS2812B
+#define LED_TYPE            WS2813
 #define COLOR_ORDER         RGB
-#define NUM_LEDS            200
+#define NUM_LEDS            100
 CRGB leds[NUM_LEDS];
 
-#define BRIGHTNESS          255
+#define DEFAULT_BRIGHTNESS  100
 #define FRAMES_PER_SECOND   120
 
+uint8_t brightness = DEFAULT_BRIGHTNESS;
 
 // Load the animations
 #include "animations.h"
@@ -78,11 +81,9 @@ Animations animations = { wonderland, blueSparks, fire, snow, confetti, hallowee
   */
 String animationNames[] = { "Wonderland", "Blue Sparks", "Fire", "Snow Flakes", "Confetti", "Halloween", "Rainbow", "Moving Rainbow", "Running Light", "Multiple Running Lights", "Clouded Beats" };
 
-
 void setup(void) {
   Serial.begin(57600);
   Serial.println("setup");
-
 
   if (WIFI) {
     startWifi();
@@ -95,7 +96,7 @@ void setup(void) {
   // fastled
   delay(1000);
   FastLED.addLeds<LED_TYPE,DATA_PIN,COLOR_ORDER>(leds, NUM_LEDS).setCorrection(Typical8mmPixel);
-  FastLED.setBrightness(BRIGHTNESS);
+  FastLED.setBrightness(brightness);
 }
 
 void loop(void) {
@@ -119,13 +120,11 @@ void loop(void) {
 
 void nextPattern() {
   Serial.println("next pattern");
-  currentAnimation = (currentAnimation + 1) % ARRAY_SIZE(animations);
+  currentAnimation = (currentAnimation + 1  ) % ARRAY_SIZE(animations);
   fadeToBlackBy(leds, NUM_LEDS, 255);
 }
 
-
-
-///// wifi webserver functions
+// WiFi webserver functions
 
 /*
  * This serves a very rudimentary responsive webview. Visit this in browser.
@@ -158,10 +157,21 @@ void handleRoot() {
                     console.log('response:', this.responseText);  \
                 } \
             }, false);  \
+            var slider = document.getElementById('brightnessSlider'); \
+            slider.addEventListener('input', function(e){  \
+                var xhr = new XMLHttpRequest(); \
+                xhr.open('POST', '/set_brightness', true);  \
+                xhr.setRequestHeader('Content-Type', 'application/json'); \
+                xhr.send(JSON.stringify({ \
+                    brightness: slider.value  \
+                }));  \
+                xhr.onload = function() { \
+                    console.log('Brightness set to:', slider.value);  \
+                } \
+            }, false);  \
         } \
     </script> \
 </head> \
-  \
 <body>  \
     <section class='hero is-mobile is-tablet is-desktop has-background-primary is-large' style='height: 100vh;'> \
         <div class='hero-body max-height'><div class='container has-text-centered'> \
@@ -173,6 +183,10 @@ void handleRoot() {
           <p class='subtitle'> \
             <br /><br /><br /><br /><br /> \
             <button class='primary has-text-white button is-link is-large' id='button'>next</button> \
+          </p> \
+          <p class='subtitle'> \
+            <br /><br /><br /><br /><br /> \
+            <input type='range' id='brightnessSlider' min='0' max='255' value='" + String(brightness) + "'> \
           </p> \
         </div></div> \
     <section> \
@@ -201,10 +215,23 @@ void startWifi() {
     nextPattern();
     server.send(200, "text/plain", animationNames[currentAnimation]);
   });
+  server.on("/set_brightness", HTTP_POST, []() {
+    String postBody = server.arg("plain");
+    int newBrightness = parseBrightness(postBody);
+    brightness = constrain(newBrightness, 0, 255);
+    FastLED.setBrightness(brightness);
+    server.send(200, "text/plain", "Brightness set to " + String(brightness));
+  });
   server.onNotFound([]() {
     server.send(404, "text/plain", "Not found");
   });
 
   server.begin();
   Serial.println("\nServer listening on port 80");
+}
+
+int parseBrightness(String json) {
+  DynamicJsonDocument doc(1024);
+  deserializeJson(doc, json);
+  return doc["brightness"];
 }
